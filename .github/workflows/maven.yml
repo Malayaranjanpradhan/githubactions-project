@@ -7,6 +7,8 @@ on:
 jobs:
   build:
     runs-on: [self-hosted, linux]
+    env:
+      AWS_REGION: ap-south-1  # Change this to your S3 bucket's region
 
     steps:
       # 1. Checkout code
@@ -30,42 +32,31 @@ jobs:
             echo "Maven is already installed"
           fi
           mvn -version
+
       # 4. Cache Maven dependencies
       - name: Cache Maven packages
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.m2/repository
+          path: ~/.m2/repository
           key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
+          restore-keys: ${{ runner.os }}-maven-
 
       # 5. Build with Maven
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
-      # 6. Upload WAR as artifact (optional, for later jobs)
-      - name: Upload WAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: myapp
-          path: target/*.war
-      # 6. Install SonarQube Scanner CLI
-      - name: Install SonarQube Scanner CLI
+      # 6. Upload WAR artifact to S3 (Leveraging Bucket Versioning)
+      - name: Upload WAR artifact to S3
         run: |
-          if [ ! -d "$HOME/sonar-scanner-cli" ]; then
-            echo "Downloading SonarQube Scanner CLI..."
-            wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-7.3.0.5189-linux-x64.zip -O /tmp/sonar-scanner.zip
-            unzip /tmp/sonar-scanner.zip -d $HOME
-            mv $HOME/sonar-scanner-7.3.0.5189-linux-x64 $HOME/sonar-scanner-cli
-          fi
-          export PATH=$HOME/sonar-scanner-cli/bin:$PATH
-          sonar-scanner -v
-   # 7. SonarQube analysis
+          echo "Uploading build artifact to S3..."
+          # Versioning is enabled, so we can overwrite this key and S3 will manage history automatically
+          aws s3 cp target/*.war s3://githubaction-s3-bkt/builds/myapp.war --region $AWS_REGION
+
+      # 7. SonarQube analysis
       - name: SonarQube Analysis
         env:
           SONAR_HOST: ${{ secrets.SONAR_HOST }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # This pulls from GitHub Secrets
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           echo "SonarQube server URL: $SONAR_HOST"
           mvn org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar \
@@ -77,22 +68,32 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     environment: production
+    env:
+      AWS_REGION: us-east-1  # Change this to your S3 bucket's region
 
     steps:
-      # 7. Download WAR artifact
-      - name: Download WAR artifact
-        uses: actions/download-artifact@v4
+      # 8. Configure AWS Credentials for the GitHub cloud runner
+      - name: Configure AWS Credentials for Deploy
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          name: myapp
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # 8. Deploy WAR via Tomcat Manager
+      # 9. Download the latest version of the WAR from S3
+      - name: Download Latest WAR from S3
+        run: |
+          echo "Downloading latest artifact from S3..."
+          aws s3 cp s3://your-s3-bucket-name/builds/myapp.war myapp.war
+
+      # 10. Deploy WAR via Tomcat Manager
       - name: Deploy to Tomcat
         run: |
-          WAR_FILE=$(ls *.war)
-          echo "Deploying $WAR_FILE to Tomcat..."
-          curl -v --upload-file "$WAR_FILE" \
+          echo "Deploying myapp.war to Tomcat..."
+          curl -v --upload-file "myapp.war" \
             "http://${{ secrets.TOMCAT_USER }}:${{ secrets.TOMCAT_PASSWORD }}@${{ secrets.TOMCAT_HOST }}/manager/text/deploy?path=/myapp&update=true"
-      # 9. Optional: verify deployment
+
+      # 11. Verify deployment
       - name: Verify deployment
         run: |
           curl -I http://${{ secrets.TOMCAT_HOST }}/myapp
