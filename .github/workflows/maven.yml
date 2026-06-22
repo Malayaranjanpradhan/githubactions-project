@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: [self-hosted, linux]
     env:
-      AWS_REGION: ap-south-1  # Change this to your S3 bucket's region
+      AWS_REGION: ap-south-1  # Mumbai region
 
     steps:
       # 1. Checkout code
@@ -45,14 +45,20 @@ jobs:
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
-      # 6. Upload WAR artifact to S3 (Leveraging Bucket Versioning)
+      # 6. Upload WAR to GitHub Artifacts (For the deploy job to fetch)
+      - name: Upload WAR artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp
+          path: target/*.war
+
+      # 7. Archive copy in AWS S3 (Using the EC2 IAM Role automatically)
       - name: Upload WAR artifact to S3
         run: |
-          echo "Uploading build artifact to S3..."
-          # Versioning is enabled, so we can overwrite this key and S3 will manage history automatically
+          echo "Archiving build artifact in S3..."
           aws s3 cp target/*.war s3://githubaction-s3-bkt/builds/myapp.war --region $AWS_REGION
 
-      # 7. SonarQube analysis
+      # 8. SonarQube analysis
       - name: SonarQube Analysis
         env:
           SONAR_HOST: ${{ secrets.SONAR_HOST }}
@@ -65,32 +71,23 @@ jobs:
             -Dsonar.login=$SONAR_TOKEN
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Reverted back to standard GitHub runner
     needs: build
     environment: production
-    env:
-      AWS_REGION: us-east-1  # Change this to your S3 bucket's region
 
     steps:
-      # 8. Configure AWS Credentials for the GitHub cloud runner
-      - name: Configure AWS Credentials for Deploy
-        uses: aws-actions/configure-aws-credentials@v4
+      # 9. Download WAR artifact natively from GitHub
+      - name: Download WAR artifact from GitHub
+        uses: actions/download-artifact@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # 9. Download the latest version of the WAR from S3
-      - name: Download Latest WAR from S3
-        run: |
-          echo "Downloading latest artifact from S3..."
-          aws s3 cp s3://your-s3-bucket-name/builds/myapp.war myapp.war
+          name: myapp
 
       # 10. Deploy WAR via Tomcat Manager
       - name: Deploy to Tomcat
         run: |
-          echo "Deploying myapp.war to Tomcat..."
-          curl -v --upload-file "myapp.war" \
+          WAR_FILE=$(ls *.war)
+          echo "Deploying $WAR_FILE to Tomcat..."
+          curl -v --upload-file "$WAR_FILE" \
             "http://${{ secrets.TOMCAT_USER }}:${{ secrets.TOMCAT_PASSWORD }}@${{ secrets.TOMCAT_HOST }}/manager/text/deploy?path=/myapp&update=true"
 
       # 11. Verify deployment
