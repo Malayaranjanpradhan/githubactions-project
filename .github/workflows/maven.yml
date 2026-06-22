@@ -61,19 +61,17 @@ jobs:
           fi
           export PATH=$HOME/sonar-scanner-cli/bin:$PATH
           sonar-scanner -v
-      # 7. SonarQube analysis
+   # 7. SonarQube analysis
       - name: SonarQube Analysis
         env:
           SONAR_HOST: ${{ secrets.SONAR_HOST }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # Renamed from LOGIN to follow modern naming
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # This pulls from GitHub Secrets
         run: |
           echo "SonarQube server URL: $SONAR_HOST"
-          curl -I $SONAR_HOST
-          # Notice we force version 4.0.0.4121 here instead of just 'sonar:sonar'
           mvn org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar \
             -Dsonar.projectKey=hotstar \
             -Dsonar.host.url=$SONAR_HOST \
-            -Dsonar.token=$SONAR_TOKEN
+            -Dsonar.login=$SONAR_TOKEN
 
   deploy:
     runs-on: ubuntu-latest
