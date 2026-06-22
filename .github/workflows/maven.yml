@@ -65,14 +65,15 @@ jobs:
       - name: SonarQube Analysis
         env:
           SONAR_HOST: ${{ secrets.SONAR_HOST }}
-          SONAR_LOGIN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # Renamed from LOGIN to follow modern naming
         run: |
           echo "SonarQube server URL: $SONAR_HOST"
           curl -I $SONAR_HOST
-          mvn sonar:sonar \
+          # Notice we force version 4.0.0.4121 here instead of just 'sonar:sonar'
+          mvn org.sonarsource.scanner.maven:sonar-maven-plugin:4.0.0.4121:sonar \
             -Dsonar.projectKey=hotstar \
             -Dsonar.host.url=$SONAR_HOST \
-            -Dsonar.login=$SONAR_LOGIN
+            -Dsonar.token=$SONAR_TOKEN
 
   deploy:
     runs-on: ubuntu-latest
